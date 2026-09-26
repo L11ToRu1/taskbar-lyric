@@ -75,6 +75,7 @@ DEFAULTS = {
     "lock": False,  # 锁定位置后拖不动
     "fg": FG,       # 歌词颜色
     "bg": BG,       # 歌词条底色
+    "source": "netease",   # 歌词源：先问这个，问不到再依次问别的
 }
 
 
@@ -133,39 +134,66 @@ _CREDIT = re.compile(
 )
 
 
-def _api(url):
+def _get_json(url, referer, timeout=8):
     request = urllib.request.Request(
-        url, headers={"User-Agent": _UA, "Referer": "https://music.163.com/"}
+        url, headers={"User-Agent": _UA, "Referer": referer}
     )
-    with urllib.request.urlopen(request, timeout=8) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
 
 
-def _search(query):
-    url = "https://music.163.com/api/search/get?s=%s&type=1&limit=5" % urllib.parse.quote(query)
-    return (_api(url).get("result") or {}).get("songs") or []
-
-
-def _fetch_lrc(song_id):
-    url = "https://music.163.com/api/song/lyric?id=%s&lv=1&kv=1&tv=-1" % song_id
-    return (_api(url).get("lrc") or {}).get("lyric") or ""
-
-
-def fetch_lyrics(title, artist, cache):
-    """返回 LRC 文本，失败返回 ''。会写入 ``cache``（key -> LRC）。"""
-    key = "%s|%s" % (title, artist)
-    if key in cache:
-        return cache[key]
-    lrc = ""
+def _from_netease(title, artist):
+    """网易云：中文曲库最全。"""
     queries = ["%s %s" % (title, artist)] if artist else []
     queries.append(title)
     for query in queries:
-        songs = _search(query.strip())
+        url = ("https://music.163.com/api/search/get?s=%s&type=1&limit=5"
+               % urllib.parse.quote(query.strip()))
+        songs = (_get_json(url, "https://music.163.com/").get("result") or {}).get("songs") or []
         if not songs:
             continue
         # 优先取歌名完全一致的，否则取第一条
         best = next((s for s in songs if (s.get("name") or "").lower() == title.lower()), songs[0])
-        lrc = _fetch_lrc(best["id"])
+        url = "https://music.163.com/api/song/lyric?id=%s&lv=1&kv=1&tv=-1" % best["id"]
+        lrc = (_get_json(url, "https://music.163.com/").get("lrc") or {}).get("lyric") or ""
+        if lrc:
+            return lrc
+    return ""
+
+
+def _from_lrclib(title, artist):
+    """LRCLIB：开放的公共曲库，欧美和冷门曲比网易云全。只要带时间轴的那种。"""
+    url = ("https://lrclib.net/api/search?track_name=%s&artist_name=%s"
+           % (urllib.parse.quote(title), urllib.parse.quote(artist or "")))
+    for hit in _get_json(url, "https://lrclib.net/", timeout=12):
+        if hit.get("syncedLyrics"):
+            return hit["syncedLyrics"]
+    return ""
+
+
+# 顺序 = 界面上列出的顺序，也是换源之后的回退顺序
+SOURCES = (("netease", "网易云音乐"), ("lrclib", "LRCLIB"))
+FETCHERS = {"netease": _from_netease, "lrclib": _from_lrclib}
+
+
+def fetch_lyrics(source, title, artist, cache):
+    """返回 LRC 文本，失败返回 ''。会写入 ``cache``（key -> LRC）。
+
+    先问配置里选的那个源，问不到再依次问其它的——两个源覆盖面不一样。
+    缓存键带上源名：换源之后同一首歌要能重新去找，而不是命中旧源存下的空结果。
+    """
+    key = "%s|%s|%s" % (source, title, artist)
+    if key in cache:
+        return cache[key]
+    order = [source] if source in FETCHERS else []
+    order += [name for name, _ in SOURCES if name != source]
+    lrc = ""
+    for name in order:
+        try:
+            lrc = FETCHERS[name](title, artist)
+        except Exception as exc:
+            print("歌词源 %s 没取到: %s" % (name, exc), file=sys.stderr)
+            lrc = ""
         if lrc:
             break
     cache[key] = lrc
@@ -252,15 +280,16 @@ class Lyrics:
     def current(self, key):
         return (self._cur[1], self._cur[2]) if self._cur[0] == key else ([], [])
 
-    def ensure(self, key, title, artist):
+    def ensure(self, key, source, title, artist):
         if self._cur[0] == key or self._pending == key:
             return
         self._pending = key
-        threading.Thread(target=self._work, args=(key, title, artist), daemon=True).start()
+        threading.Thread(target=self._work, args=(key, source, title, artist),
+                         daemon=True).start()
 
-    def _work(self, key, title, artist):
+    def _work(self, key, source, title, artist):
         try:
-            times, lines = parse_lrc(fetch_lyrics(title, artist, self.cache))
+            times, lines = parse_lrc(fetch_lyrics(source, title, artist, self.cache))
         except Exception as exc:
             print("歌词获取失败:", exc, file=sys.stderr)
             times, lines = [], []
@@ -623,10 +652,12 @@ class Overlay:
             self.on_post(action)
 
         state = self.state
-        key = "%s|%s" % (state["title"], state["artist"])
+        # 键里带上源名：换源之后同一首歌会重新去取，设置改完立刻生效
+        source = self.cfg.get("source", "netease")
+        key = "%s|%s|%s" % (source, state["title"], state["artist"])
         if state["title"] and key != self.key:
             self.key = key
-            self.lyrics.ensure(key, state["title"], state["artist"])
+            self.lyrics.ensure(key, source, state["title"], state["artist"])
 
         text = state["error"]
         if state["title"]:

@@ -52,7 +52,11 @@ DEFAULTS = {
     "lock": False,
     "fg": "#f2f2f7",   # 歌词颜色
     "bg": "#0d0d12",   # 歌词条底色
+    "source": "netease",
 }
+
+# 歌词源：配置里的值 -> 界面上显示的名字。顺序就是回退顺序
+SOURCES = (("netease", "网易云音乐"), ("lrclib", "LRCLIB"))
 
 # ---- Material 3 深色配色 ----
 M3_SURFACE = "#141218"
@@ -245,6 +249,7 @@ class SettingsWindow:
         ("appearance", 5),
         ("colour", 2),
         ("behaviour", 3),
+        ("lyrics", 1),
     )
 
     def _flow(self, event=None):
@@ -415,6 +420,31 @@ class SettingsWindow:
         if picked:
             swatch.configure(fg_color=picked)
             self._save({key: picked})
+
+    def _lyrics_card(self, parent):
+        card = self._card(parent, "歌词")
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=6)
+        ctk.CTkLabel(row, text="歌词源", text_color=M3_ON_SURFACE_VARIANT,
+                     font=ctk.CTkFont(size=13)).pack(side="left")
+        seg = ctk.CTkSegmentedButton(
+            row, values=[name for _, name in SOURCES],
+            selected_color=M3_PRIMARY, selected_hover_color=M3_ON_PRIMARY_CONTAINER,
+            unselected_color=M3_CONTAINER_HIGH, unselected_hover_color=M3_OUTLINE,
+            text_color=M3_ON_SURFACE, font=ctk.CTkFont(size=12))
+        seg.set(dict(SOURCES)[self.cfg.get("source", "netease")])
+        seg.configure(command=self._pick_source)   # 值设好再挂回调
+        seg.pack(side="right")
+        ctk.CTkLabel(card, text="问不到的会自动换另一个源",
+                     text_color=M3_ON_SURFACE_VARIANT,
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=20)
+        ctk.CTkFrame(card, fg_color="transparent", height=8).pack()
+
+    def _pick_source(self, label):
+        for key, name in SOURCES:
+            if name == label:
+                self._save({"source": key})
+                return
 
     def _behaviour_card(self, parent):
         card = self._card(parent, "行为")
