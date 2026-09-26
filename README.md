@@ -14,7 +14,7 @@
 
 ## 下载安装
 
-到 [Releases](https://github.com/L11ToRu1/taskbar-lyric/releases) 下载 `TBLyricSetup.exe`，双击安装。
+到 [Releases](https://github.com/Mizuak1/taskbar-lyric/releases) 下载 `TBLyricSetup.exe`，双击安装。
 
 - 装到 `%LOCALAPPDATA%\Programs\TBLyric`，**不弹 UAC**
 - 自动创建开始菜单快捷方式，可选桌面快捷方式

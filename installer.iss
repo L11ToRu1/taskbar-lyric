@@ -9,8 +9,8 @@
 AppId={{8E3F2C1A-5B4D-4E7F-9A21-3C6D5E8F1A02}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=L11ToRu1
-AppPublisherURL=https://github.com/L11ToRu1/taskbar-lyric
+AppPublisher=Mizuak1
+AppPublisherURL=https://github.com/Mizuak1/taskbar-lyric
 DefaultDirName={autopf}\TBLyric
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
