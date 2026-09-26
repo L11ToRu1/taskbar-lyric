@@ -2,6 +2,10 @@
 build/
 dist/
 *.exe
+*.spec
+
+# Windows shell links
+*.lnk
 
 # Python
 __pycache__/
