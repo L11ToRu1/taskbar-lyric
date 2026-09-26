@@ -6,3 +6,7 @@ dist/
 # Python
 __pycache__/
 *.pyc
+
+# generated from VERSION by make_version.py
+version.iss
+version_info.txt

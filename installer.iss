@@ -3,12 +3,14 @@
 ; 需要 Inno Setup 6：winget install JRSoftware.InnoSetup
 
 #define AppName "Taskbar Lyric"
-#define AppVersion "1.1.0"
+; 版本号只在根目录的 VERSION 里写一次，这个文件由 make_version.py 生成
+#include "version.iss"
 
 [Setup]
 AppId={{8E3F2C1A-5B4D-4E7F-9A21-3C6D5E8F1A02}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}.0
 AppPublisher=Mizuak1
 AppPublisherURL=https://github.com/Mizuak1/taskbar-lyric
 DefaultDirName={autopf}\TBLyric

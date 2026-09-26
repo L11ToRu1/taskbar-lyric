@@ -8,6 +8,9 @@ if not exist %ISCC% (
   pause
   exit /b 1
 )
+rem version.iss is generated from VERSION
+python make_version.py
+if errorlevel 1 exit /b 1
 %ISCC% installer.iss
 if errorlevel 1 exit /b 1
 echo.
