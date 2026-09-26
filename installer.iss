@@ -1,9 +1,9 @@
-﻿; Taskbar Lyric 安装程序脚本
+; Taskbar Lyric 安装程序脚本
 ; 编译：  iscc installer.iss    （或双击 build_installer.bat）
 ; 需要 Inno Setup 6：winget install JRSoftware.InnoSetup
 
 #define AppName "Taskbar Lyric"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 
 [Setup]
 AppId={{8E3F2C1A-5B4D-4E7F-9A21-3C6D5E8F1A02}

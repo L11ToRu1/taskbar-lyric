@@ -10,6 +10,7 @@ import os
 import sys
 import tkinter as tk
 import winreg
+from tkinter import colorchooser
 from ctypes import wintypes
 from pathlib import Path
 
@@ -49,6 +50,8 @@ DEFAULTS = {
     "height": 30,
     "radius": 10,
     "lock": False,
+    "fg": "#f2f2f7",   # 歌词颜色
+    "bg": "#0d0d12",   # 歌词条底色
 }
 
 # ---- Material 3 深色配色 ----
@@ -169,6 +172,7 @@ class SettingsWindow:
 
         self._header(win)
         self._appearance_card(win)
+        self._colour_card(win)
         self._behaviour_card(win)
         self._buttons(win)
 
@@ -251,6 +255,30 @@ class SettingsWindow:
             value_label.configure(text=fmt % shown)
             self._save({key: shown})
         return handler
+
+    def _colour_card(self, win):
+        """调色盘：两个色块按钮，点开系统取色器。"""
+        card = self._card(win, "颜色")
+        self._swatch(card, "歌词颜色", "fg")
+        self._swatch(card, "背景颜色", "bg")
+        ctk.CTkFrame(card, fg_color="transparent", height=8).pack()
+
+    def _swatch(self, card, text, key):
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=6)
+        ctk.CTkLabel(row, text=text, text_color=M3_ON_SURFACE_VARIANT,
+                     font=ctk.CTkFont(size=13)).pack(side="left")
+        swatch = ctk.CTkButton(row, text="", width=46, height=26, corner_radius=13,
+                               fg_color=self.cfg[key], hover_color=M3_OUTLINE,
+                               command=lambda: self._pick_colour(key, swatch))
+        swatch.pack(side="right")
+        return swatch
+
+    def _pick_colour(self, key, swatch):
+        picked = colorchooser.askcolor(color=self.cfg[key], title="选择颜色")[1]
+        if picked:
+            swatch.configure(fg_color=picked)
+            self._save({key: picked})
 
     def _behaviour_card(self, win):
         card = self._card(win, "行为")

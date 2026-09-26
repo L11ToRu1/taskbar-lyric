@@ -63,6 +63,8 @@ for _name in ("stdout", "stderr"):
 
 
 # ---- 默认值（可在设置窗口里改，改完存到 config.json） ----------------------
+BG = "#0d0d12"   # 默认底色
+FG = "#f2f2f7"   # 默认字色
 DEFAULTS = {
     "font_size": 16,
     "alpha": 0.82,
@@ -71,7 +73,21 @@ DEFAULTS = {
     "height": 30,   # 实测 Win11 任务栏元素都是 30px 高
     "radius": 10,   # 实测搜索框圆角约 10px
     "lock": False,  # 锁定位置后拖不动
+    "fg": FG,       # 歌词颜色
+    "bg": BG,       # 歌词条底色
 }
+
+
+def hover_color(colour):
+    """hover 时把底色往对比方向挪一点，深浅底色都能看出反馈。"""
+    try:
+        r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, IndexError):
+        return colour          # 配置被手改坏了也不能崩
+    shift = -30 if r + g + b > 380 else 30
+    return "#%02x%02x%02x" % tuple(max(0, min(255, v + shift)) for v in (r, g, b))
+
+
 FONT_FAMILY = "Microsoft YaHei UI"
 POLL_SECONDS = 0.4  # 轮询播放器的间隔
 TICK_MS = 100
@@ -80,9 +96,6 @@ TICK_MS = 100
 APP_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "taskbar-lyric"
 CACHE_FILE = APP_DIR / "cache.json"
 CONFIG_FILE = APP_DIR / "config.json"
-BG = "#0d0d12"        # 常态底色
-BG_HOVER = "#2b2b34"  # 悬停变亮，模仿搜索框的 hover 反馈
-FG = "#f2f2f7"
 
 POST = queue.Queue()  # 托盘线程 -> 主线程的动作队列
 
@@ -449,8 +462,8 @@ class Overlay:
         # 保住分层样式，真正的不透明度由 ensure_layered 设。
         self.root.attributes("-alpha", min(float(cfg["alpha"]), 0.99))
         ensure_layered(self.hwnd, cfg["alpha"])
-        color = BG_HOVER if self._hovered else BG
-        self.label.config(bg=color)
+        color = hover_color(cfg["bg"]) if self._hovered else cfg["bg"]
+        self.label.config(fg=cfg["fg"], bg=color)
         self.root.configure(bg=color)
         screen_w, screen_h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         w = int(screen_w * cfg["width"])
@@ -552,7 +565,7 @@ class Overlay:
 
     def _hover(self, on):
         self._hovered = on
-        color = BG_HOVER if on else BG
+        color = hover_color(self.cfg["bg"]) if on else self.cfg["bg"]
         self.label.config(bg=color)
         self.root.configure(bg=color)
 
@@ -739,6 +752,9 @@ def _selftest():
     assert line_at(times, 4.9) == 2
     assert line_at(times, 999) == 2
     assert parse_lrc("no stamps here") == ([], [])
+    assert hover_color("#0d0d12") == "#2b2b30"    # 深底 -> 提亮
+    assert hover_color("#f2f2f7") == "#d4d4d9"    # 浅底 -> 压暗
+    assert hover_color("坏值") == "坏值"           # 配置被手改坏也不能崩
 
     sample = {}
 
