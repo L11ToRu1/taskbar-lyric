@@ -171,17 +171,24 @@ class SettingsWindow:
         win.configure(fg_color=M3_SURFACE)
 
         self._header(win)
-        self._appearance_card(win)
-        self._colour_card(win)
-        self._behaviour_card(win)
         self._buttons(win)
 
+        # 卡片不直接挂在窗口上，而是挂到 body：窗口比高度宽时 body 分成几列，
+        # 卡片按高度摊匀进去，就是网页那种自适应磁贴
+        self.body = ctk.CTkFrame(win, fg_color="transparent")
+        self.body.pack(fill="both", expand=True, padx=10)
+
+        self._grip(win)
+        self._cols = 0
+
         win.bind("<Escape>", lambda e: root.destroy())
+        win.bind("<Configure>", self._flow)
         win.update_idletasks()
         self._place(win)
         win.update()
         frame = win.frame()
         set_dwm_round(int(frame, 16) if isinstance(frame, str) else int(frame))
+        self._flow()
         win.focus_force()
 
     # ---- 自绘标题栏（可拖动） ----
@@ -210,18 +217,78 @@ class SettingsWindow:
     def _drag_move(self, event):
         self.win.geometry("+%d+%d" % (event.x_root - self._dx, event.y_root - self._dy))
 
+    # ---- 自适应排列 ----
+    # 每张卡大致占几行，只用来把卡片摊匀到各列（贪心：放进当前最矮的那列）
+    CARDS = (
+        ("appearance", 5),
+        ("colour", 2),
+        ("behaviour", 3),
+    )
+
+    def _flow(self, event=None):
+        """窗口比高度宽就分列——网页那种响应式磁贴。
+
+        窗口是无边框的，尺寸只由 _place 和右下角那个 grip 决定，所以这里只按
+        当前宽高比选列数；列数真的变了才重建卡片，拖动过程中不会反复重排。
+        """
+        w, h = self.win.winfo_width(), self.win.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        cols = 2 if w > h else 1
+        if cols == self._cols:
+            return
+        self._cols = cols
+
+        for child in self.body.winfo_children():
+            child.destroy()
+
+        columns = []
+        for i in range(cols):
+            col = ctk.CTkFrame(self.body, fg_color="transparent")
+            col.pack(side="left", fill="both", expand=True,
+                     padx=(0 if i == 0 else 6, 0 if i == cols - 1 else 6))
+            columns.append(col)
+
+        heights = [0] * cols
+        for name, weight in self.CARDS:
+            i = heights.index(min(heights))
+            getattr(self, "_" + name + "_card")(columns[i])
+            heights[i] += weight
+
+        # 掉回单列时内容会变高，窗口不够高就长一点，别把卡片截掉
+        self.win.update_idletasks()
+        need = self.win.winfo_reqheight()
+        if self.win.winfo_height() < need:
+            self.win.geometry("%dx%d" % (self.win.winfo_width(), need))
+
+    def _grip(self, win):
+        """右下角的缩放把手——无边框窗口没有系统边框可以拖。"""
+        grip = tk.Frame(win, bg=M3_OUTLINE, width=12, height=12, cursor="size_nw_se")
+        grip.place(relx=1.0, rely=1.0, anchor="se", x=-9, y=-9)
+        grip.bind("<Button-1>", self._resize_start)
+        grip.bind("<B1-Motion>", self._resize_move)
+
+    def _resize_start(self, event):
+        self._rw, self._rh = self.win.winfo_width(), self.win.winfo_height()
+        self._rx, self._ry = event.x_root, event.y_root
+
+    def _resize_move(self, event):
+        w = max(360, self._rw + event.x_root - self._rx)
+        h = max(300, self._rh + event.y_root - self._ry)
+        self.win.geometry("%dx%d" % (w, h))
+
     # ---- 卡片 ----
     @staticmethod
     def _card(parent, heading):
         card = ctk.CTkFrame(parent, fg_color=M3_CONTAINER, corner_radius=M3_RADIUS_CARD)
-        card.pack(fill="x", padx=16, pady=(4, 12))
+        card.pack(fill="x", pady=(4, 12))
         ctk.CTkLabel(card, text=heading, text_color=M3_PRIMARY,
                      font=ctk.CTkFont(size=13, weight="bold")).pack(
             anchor="w", padx=20, pady=(16, 4))
         return card
 
-    def _appearance_card(self, win):
-        card = self._card(win, "外观")
+    def _appearance_card(self, parent):
+        card = self._card(parent, "外观")
         rows = (
             ("字号", "font_size", 10, 40, 1, "%d"),
             ("不透明度", "alpha", 0.3, 1.0, 0.02, "%.2f"),
@@ -256,9 +323,9 @@ class SettingsWindow:
             self._save({key: shown})
         return handler
 
-    def _colour_card(self, win):
+    def _colour_card(self, parent):
         """调色盘：两个色块按钮，点开系统取色器。"""
-        card = self._card(win, "颜色")
+        card = self._card(parent, "颜色")
         self._swatch(card, "歌词颜色", "fg")
         self._swatch(card, "背景颜色", "bg")
         ctk.CTkFrame(card, fg_color="transparent", height=8).pack()
@@ -280,8 +347,8 @@ class SettingsWindow:
             swatch.configure(fg_color=picked)
             self._save({key: picked})
 
-    def _behaviour_card(self, win):
-        card = self._card(win, "行为")
+    def _behaviour_card(self, parent):
+        card = self._card(parent, "行为")
         self.dock = self._switch(card, "镶嵌到任务栏",
                                  bool(self.cfg.get("dock")), self._toggle_dock)
         self.lock = self._switch(card, "锁定位置",
@@ -306,7 +373,7 @@ class SettingsWindow:
 
     def _buttons(self, win):
         row = ctk.CTkFrame(win, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=(4, 18))
+        row.pack(side="bottom", fill="x", padx=16, pady=(4, 18))
         ctk.CTkButton(row, text="重置位置", height=44, corner_radius=M3_RADIUS_PILL,
                       fg_color=M3_SECONDARY_CONTAINER, hover_color=M3_OUTLINE,
                       text_color=M3_ON_SECONDARY_CONTAINER,
@@ -321,12 +388,13 @@ class SettingsWindow:
                                                       fill="x", padx=(6, 0))
 
     def _place(self, win):
-        width = max(400, win.winfo_reqwidth())
-        height = win.winfo_reqheight()
+        # 默认开成一个「宽比高长」的窗口，卡片一上来就是两列磁贴
         screen_w, screen_h = win.winfo_screenwidth(), win.winfo_screenheight()
+        width = min(780, screen_w - 40)
+        height = min(520, screen_h - 100)
         win.geometry("%dx%d+%d+%d" % (width, height,
                                       max(0, (screen_w - width) // 2),
-                                      max(40, (screen_h - height) // 2 - 60)))
+                                      max(40, (screen_h - height) // 2 - 40)))
 
     # ---- 写配置 ----------------------------------------------------------
     def _save(self, changes):
