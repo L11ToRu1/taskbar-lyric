@@ -156,6 +156,98 @@ def set_dwm_round(hwnd):
                                ctypes.byref(value), ctypes.sizeof(value))
 
 
+# ---- 无边框窗口的原生缩放 ---------------------------------------------------
+# overrideredirect 的窗口拖不了边。补上 WS_THICKFRAME 再拦两个消息，就能把缩放
+# 交回给 Windows：拖哪条边、光标形状、贴边、DWM 阴影全是系统行为，圆角也不受影响，
+# 不用在角上摆个把手。
+#   WM_NCCALCSIZE -> 0    客户区铺满整窗，于是看不见系统边框
+#   WM_NCHITTEST  -> 边缘  自己报「这儿是边框」，系统接手缩放
+
+_u32 = ctypes.windll.user32
+_GWL_STYLE = -16
+_GWLP_WNDPROC = -4
+_WS_THICKFRAME = 0x00040000
+_WM_NCCALCSIZE = 0x0083
+_WM_NCHITTEST = 0x0084
+_WM_GETMINMAXINFO = 0x0024
+_SWP_NOSIZE, _SWP_NOMOVE, _SWP_NOZORDER, _SWP_FRAMECHANGED = 0x1, 0x2, 0x4, 0x20
+_HTLEFT, _HTRIGHT, _HTTOP, _HTTOPLEFT, _HTTOPRIGHT = 10, 11, 12, 13, 14
+_HTBOTTOM, _HTBOTTOMLEFT, _HTBOTTOMRIGHT = 15, 16, 17
+_EDGE = 7                      # 离边多近算「拖到边框了」
+_MIN_W, _MIN_H = 380, 320      # 再小卡片就全挤没了
+
+_WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_void_p, ctypes.c_uint,
+                              ctypes.c_size_t, ctypes.c_ssize_t)
+
+
+class _MINMAXINFO(ctypes.Structure):
+    _fields_ = [("ptReserved", wintypes.POINT), ("ptMaxSize", wintypes.POINT),
+                ("ptMaxPosition", wintypes.POINT), ("ptMinTrackSize", wintypes.POINT),
+                ("ptMaxTrackSize", wintypes.POINT)]
+
+
+_u32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+_u32.GetWindowLongW.restype = ctypes.c_long
+_u32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+_u32.SetWindowLongW.restype = ctypes.c_long
+_u32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                              ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+_u32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+_u32.CallWindowProcW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                                 ctypes.c_size_t, ctypes.c_ssize_t]
+_u32.CallWindowProcW.restype = ctypes.c_ssize_t
+_set_wndproc = getattr(_u32, "SetWindowLongPtrW", _u32.SetWindowLongW)
+_set_wndproc.argtypes = [wintypes.HWND, ctypes.c_int, _WNDPROC]
+_set_wndproc.restype = ctypes.c_void_p
+
+
+def make_resizable(hwnd):
+    """让无边框窗口能被原生拖边缩放。返回值必须一直留着——回调被回收窗口就崩。"""
+    style = _u32.GetWindowLongW(hwnd, _GWL_STYLE)
+    _u32.SetWindowLongW(hwnd, _GWL_STYLE, style | _WS_THICKFRAME)
+    _u32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                      _SWP_NOSIZE | _SWP_NOMOVE | _SWP_NOZORDER | _SWP_FRAMECHANGED)
+
+    keep = {}
+
+    def proc(hwnd, msg, wparam, lparam):
+        if msg == _WM_NCCALCSIZE and wparam:
+            return 0
+        if msg == _WM_GETMINMAXINFO:
+            info = ctypes.cast(lparam, ctypes.POINTER(_MINMAXINFO)).contents
+            info.ptMinTrackSize.x, info.ptMinTrackSize.y = _MIN_W, _MIN_H
+            return 0
+        if msg == _WM_NCHITTEST:
+            x = ctypes.c_short(lparam & 0xFFFF).value
+            y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+            r = wintypes.RECT()
+            _u32.GetWindowRect(hwnd, ctypes.byref(r))
+            left, right = x - r.left < _EDGE, r.right - x < _EDGE
+            top, bottom = y - r.top < _EDGE, r.bottom - y < _EDGE
+            if top and left:
+                return _HTTOPLEFT
+            if top and right:
+                return _HTTOPRIGHT
+            if bottom and left:
+                return _HTBOTTOMLEFT
+            if bottom and right:
+                return _HTBOTTOMRIGHT
+            if left:
+                return _HTLEFT
+            if right:
+                return _HTRIGHT
+            if top:
+                return _HTTOP
+            if bottom:
+                return _HTBOTTOM
+        return _u32.CallWindowProcW(keep["old"], hwnd, msg, wparam, lparam)
+
+    cb = _WNDPROC(proc)
+    keep["cb"] = cb                  # 局部变量会被回收，挂到返回值上
+    keep["old"] = _set_wndproc(hwnd, _GWLP_WNDPROC, cb)
+    return keep
+
+
 # ---- 设置窗口 -------------------------------------------------------------
 
 class SettingsWindow:
@@ -178,7 +270,6 @@ class SettingsWindow:
         self.body = ctk.CTkFrame(win, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=10)
 
-        self._grip(win)
         self._cols = 0
 
         win.bind("<Escape>", lambda e: root.destroy())
@@ -187,7 +278,10 @@ class SettingsWindow:
         self._place(win)
         win.update()
         frame = win.frame()
-        set_dwm_round(int(frame, 16) if isinstance(frame, str) else int(frame))
+        hwnd = int(frame, 16) if isinstance(frame, str) else int(frame)
+        set_dwm_round(hwnd)
+        # 返回值必须留着：窗口过程回调一被回收，窗口就崩
+        self._wndproc = make_resizable(hwnd)
         self._flow()
         win.focus_force()
 
@@ -228,8 +322,8 @@ class SettingsWindow:
     def _flow(self, event=None):
         """窗口比高度宽就分列——网页那种响应式磁贴。
 
-        窗口是无边框的，尺寸只由 _place 和右下角那个 grip 决定，所以这里只按
-        当前宽高比选列数；列数真的变了才重建卡片，拖动过程中不会反复重排。
+        缩放走的是系统原生拖边（见 make_resizable），所以这里只按当前宽高比
+        选列数；列数真的变了才重建卡片，拖动过程中不会反复重排。
         """
         w, h = self.win.winfo_width(), self.win.winfo_height()
         if w <= 1 or h <= 1:
@@ -260,22 +354,6 @@ class SettingsWindow:
         need = self.win.winfo_reqheight()
         if self.win.winfo_height() < need:
             self.win.geometry("%dx%d" % (self.win.winfo_width(), need))
-
-    def _grip(self, win):
-        """右下角的缩放把手——无边框窗口没有系统边框可以拖。"""
-        grip = tk.Frame(win, bg=M3_OUTLINE, width=12, height=12, cursor="size_nw_se")
-        grip.place(relx=1.0, rely=1.0, anchor="se", x=-9, y=-9)
-        grip.bind("<Button-1>", self._resize_start)
-        grip.bind("<B1-Motion>", self._resize_move)
-
-    def _resize_start(self, event):
-        self._rw, self._rh = self.win.winfo_width(), self.win.winfo_height()
-        self._rx, self._ry = event.x_root, event.y_root
-
-    def _resize_move(self, event):
-        w = max(360, self._rw + event.x_root - self._rx)
-        h = max(300, self._rh + event.y_root - self._ry)
-        self.win.geometry("%dx%d" % (w, h))
 
     # ---- 卡片 ----
     @staticmethod
